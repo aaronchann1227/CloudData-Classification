@@ -1,10 +1,12 @@
 # CloudData-Classification
-Exploration and modeling of cloud detection in the polar regions based on radiance recorded automatically by the MISR sensor abroad the NASA satellite Terra
 ---
+Exploration and modeling of cloud detection in the polar regions based on radiance recorded automatically by the MISR sensor abroad the NASA satellite Terra
+
 
 #CVGeneric (the cross validation function)
 ---
 this function performs K-fold cross validation on a classifier.
+
 Function parameters:
 -classifier: string to identify the classifier. Options include:
 --"QDA" - Quadratic Discriminant Analysis
