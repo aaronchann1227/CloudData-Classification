@@ -1,19 +1,22 @@
+library(foreach)
+library(doParallel)
 library(caret)
-library(kernlab)
 library(MASS)
+library(rpart)
+library(dplyr)
 
 QDA = function(data, hyperparams, formula) {
   if (!is.null(hyperparams[['prior']])) {
     return(qda(formula, data, prior = hyperparams[['prior']]))
   }
-  qda(formula, data)
+  MASS::qda(formula, data)
 }
 
 LDA = function(data, hyperparams, formula) {
   if (!is.null(hyperparams[['prior']])) {
     return(lda(formula, data, prior = hyperparams[['prior']]))
   }
-  lda(formula, data)
+  MASS::lda(formula, data)
 }
 
 logistic = function(data, hyperparams, formula) {
@@ -21,22 +24,30 @@ logistic = function(data, hyperparams, formula) {
 }
 
 kernelSVM = function(data, hyperparams, formula) {
-  data = scale(data, scale = T, center = T)
-  ksvm(formula,data=data,kernel='rbfdot', kpar = hyperparams)
-  
+  caret::train(formula, 
+               data=data,
+               method ='svmRadial',
+               trControl=caret::trainControl(method = "none"),
+               tuneGrid = expand.grid(C = hyperparams[['C']],sigma = hyperparams[['sigma']]))
+}
+
+dtree = function(data, hyperparams, formula) {
+  rpart::rpart(formula, data=data, method = 'class')
 }
 
 split.1 = function(data, K) {
-  data1 = data[data$image == 'data1',]
-  data2 = data[data$image == 'data2',]
-  data3 = data[data$image == 'data3',]
-  
+  set.seed(123)
+  uniqueImages = sort(unique(data$image))
+  images = list()
+  for (image in uniqueImages) {
+    images[[length(images)+1]] = data[data$image == image,]
+  }
   
   # METHOD 1 (divide by blocks)
   BLOCK_SIZE = 10
   blocks = list()
   images = list(data1,data2,data3)
-  for (i in 1:3) {
+  for (i in 1:length(images)) {
     image = images[[i]]
     x = range(image$x)
     x.coordinates = seq(x[1],x[2],BLOCK_SIZE)
@@ -78,10 +89,20 @@ split.2 = function(data) {
 }
 
 CVgeneric = function(classifier, data, K, loss, hyperparams, formula, splitMethod) {
+  
+  
   if (splitMethod == 1) {
     folds = split.1(data, K)
   } else {
     folds = split.2(data)
+  }
+  if (classifier == 'kernelSVM') {
+    
+    data = data[,]
+    data$label = factor(data$label)
+    cores=detectCores()
+    cl <- makeCluster(cores[1]-1) 
+    registerDoParallel(cl)
   }
   classifierModel = eval(as.symbol(classifier))
   error = c()
@@ -90,12 +111,29 @@ CVgeneric = function(classifier, data, K, loss, hyperparams, formula, splitMetho
     trainData = data[-fold,-c(1,2,12)]
     testData = data[fold,-c(1,2,12)]
     model = classifierModel(trainData,hyperparams, formula)
-    predicted = predict(model, testData, type = "response")
-    if (classifier == 'QDA' || classifier == 'LDA') {
-      predicted = as.numeric(predicted$class)-1
+
+    if (classifier == 'dtree') {
+      p = predict(model, testData, type = "prob")[,2]
+    } else if (classifier == 'kernelSVM') {
+      predicted = predict(model, testData)
+    } else {
+      p = predict(model, testData, type = 'response')
     }
-    error = c(error,loss(predicted, testData$label))
-    accuracies = c(accuracies, mean(round(predicted) == testData$label))
+  
+    if (classifier == 'QDA' || classifier == 'LDA') {
+      p= p$posterior[,2]
+    }
+    if (classifier != "kernelSVM") {
+      error = c(error,loss(p, as.numeric(testData$label)))
+      predicted = round(p)
+    } else{
+      error = c(0,error)
+    }
+    accuracies = c(accuracies, mean(as.numeric(predicted) == as.numeric(testData$label)))
+    
+  }
+  if (classifier == 'kernelSVM') {
+    stopCluster(cl)
   }
   list("losses"=error / K,"accuracies"=accuracies)
 }
